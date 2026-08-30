@@ -83,6 +83,49 @@ python scripts/visualize_anticipation.py
 
 Outputs go to `outputs/` as PNG images you can put in your report.
 
+## Phantom segmentation and U-Net sanity check
+
+The combined animal/phantom archive is kept in `data/raw/`, but the setup script
+extracts only its official phantom train and test splits. Existing human data is
+left untouched.
+
+```powershell
+python scripts/setup_phantom_segmentation.py
+python scripts/visualize_segmentation.py --dataset phantom
+python scripts/train_phantom_unet.py --sanity
+```
+
+Phantom `.npy` masks contain background `0` and instrument labels `1` and
+sometimes `2`. The current binary pipeline intentionally maps every value above
+zero to foreground. The sanity mode uses 32 training and 16 validation images
+from the official training split for one epoch; it verifies the pipeline but is
+not a meaningful experiment.
+
+Subsets are stored as filename manifests rather than copied image folders. The
+official phantom test split stays untouched during development. A useful first
+experiment is:
+
+```powershell
+python scripts/train_phantom_unet.py --max-train 500 --max-val 100 --epochs 15 --batch-size 4 --image-size 256
+```
+
+Each experiment saves `history.csv`, `loss_curve.png`, train/validation filename
+manifests, best/latest checkpoints, and `predictions.png` under `outputs/`.
+
+Stop with `Ctrl+C`; the previous completed epoch remains safe. Resume to a total
+target epoch count with:
+
+```powershell
+python scripts/train_phantom_unet.py --resume outputs/phantom_unet_subset/last_model.pt --epochs 15
+```
+
+After model and hyperparameter choices are fixed, evaluate the best checkpoint
+once on the official phantom test split:
+
+```powershell
+python scripts/evaluate_phantom_unet.py --checkpoint outputs/phantom_unet_subset/best_model.pt
+```
+
 ## 6. Folder layout (target)
 
 ```
