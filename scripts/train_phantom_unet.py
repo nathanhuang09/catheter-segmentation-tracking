@@ -203,6 +203,11 @@ def main():
     parser.add_argument("--image-size", type=int, default=256)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--experiment", default="phantom_unet_subset")
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        help="Parent directory for experiment outputs (for example, mounted Google Drive)",
+    )
     parser.add_argument("--resume", type=Path, help="Resume from an experiment checkpoint")
     args = parser.parse_args()
     if args.sanity:
@@ -232,7 +237,8 @@ def main():
         train_data, val_data, train_indices, val_indices = make_subsets(
             source, args.max_train, args.max_val, args.seed
         )
-        output_dir = OUTPUT / args.experiment
+        output_root = args.output_root.expanduser() if args.output_root else OUTPUT
+        output_dir = output_root / args.experiment
         output_dir.mkdir(parents=True, exist_ok=True)
         write_manifest(output_dir / "train_files.csv", source, train_indices)
         write_manifest(output_dir / "val_files.csv", source, val_indices)

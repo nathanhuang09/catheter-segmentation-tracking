@@ -1,4 +1,4 @@
-"""Paths for CathAction demo — edit these if your folders differ."""
+"""Project paths and CathAction task configuration."""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent

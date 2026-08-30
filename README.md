@@ -1,4 +1,4 @@
-# CathAction Demo (Cursor)
+# Catheter Segmentation and Tracking
 
 Visualize **segmentation**, **recognition**, and **anticipation** on a small CathAction subset.
 
@@ -6,7 +6,7 @@ Visualize **segmentation**, **recognition**, and **anticipation** on a small Cat
 
 1. Open **Cursor**
 2. **File → Open Folder…**
-3. Choose `C:\Users\natha\Cath`
+3. Choose the cloned `catheter-segmentation-tracking` folder.
 
 You should see this README and a `scripts/` folder in the left sidebar (Explorer).
 
@@ -25,7 +25,7 @@ You do **not** need to create files by hand for this project — the starter scr
 ## 3. One-time setup (terminal in Cursor)
 
 ```powershell
-cd C:\Users\natha\Cath
+cd path\to\catheter-segmentation-tracking
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
@@ -111,6 +111,13 @@ python scripts/train_phantom_unet.py --max-train 500 --max-val 100 --epochs 15 -
 
 Each experiment saves `history.csv`, `loss_curve.png`, train/validation filename
 manifests, best/latest checkpoints, and `predictions.png` under `outputs/`.
+
+To save experiment artifacts directly to a mounted location such as Google
+Drive, set an output root; no symbolic link is needed:
+
+```powershell
+python scripts/train_phantom_unet.py --output-root "/content/drive/MyDrive/CathAction/experiments" --experiment phantom_unet_1000_gpu
+```
 
 Stop with `Ctrl+C`; the previous completed epoch remains safe. Resume to a total
 target epoch count with:
