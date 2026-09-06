@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT / "data" / "raw" / "segmentation_human_train.zip"
-OUT = ROOT / "data" / "segmentation"
+OUT = ROOT / "data" / "segmentation" / "human"
 
 
 def find_split_dirs(extracted: Path) -> dict[str, tuple[Path, Path]]:

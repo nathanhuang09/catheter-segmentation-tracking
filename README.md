@@ -48,7 +48,8 @@ The dataset repo has a few large zips. For this demo:
 huggingface-cli download airvlab/CathAction segmentation_human_train.zip --repo-type dataset --local-dir ./data/raw
 ```
 
-Then unzip `data/raw/segmentation_human_train.zip` into `data/segmentation/`.
+Then run `python scripts/setup_human_segmentation.py`. It extracts the archive
+into `data/segmentation/human/train/`.
 
 ### Action recognition & anticipation (subset)
 
@@ -83,7 +84,48 @@ python scripts/visualize_anticipation.py
 
 Outputs go to `outputs/` as PNG images you can put in your report.
 
-## Phantom segmentation and U-Net sanity check
+## Segmentation datasets and U-Net baselines
+
+The human and phantom workflows share the same binary U-Net implementation.
+Dataset-specific entry points make experiments harder to mix up while retaining
+the older phantom filenames for existing Colab notebooks:
+
+| Dataset | Setup | Train | Evaluate |
+|---|---|---|---|
+| Human | `setup_human_segmentation.py` | `train_human_unet.py` | `evaluate_human_unet.py` |
+| Phantom | `setup_phantom_segmentation.py` | `train_phantom_unet.py` | `evaluate_phantom_unet.py` |
+
+The human archive contains 5,283 matched 512x512 image/mask pairs. It has no
+official test directory, so the trainer creates train, validation, and test
+filename manifests without copying images. Entire frame sequences are assigned
+to one split to prevent neighboring frames from leaking between splits.
+
+Run a cheap human pipeline check:
+
+```powershell
+python scripts/setup_human_segmentation.py
+python scripts/train_human_unet.py --sanity
+```
+
+Then train a small baseline (whole-sequence grouping may make the exact counts
+slightly larger than the requested targets):
+
+```powershell
+python scripts/train_human_unet.py --max-train 3500 --max-val 600 --max-test 600 --epochs 30 --batch-size 16 --image-size 256 --experiment human_unet_baseline
+python scripts/evaluate_human_unet.py --checkpoint outputs/human_unet_baseline/best_model.pt
+```
+
+In Colab, save checkpoints directly to mounted Drive:
+
+```bash
+!python scripts/train_human_unet.py \
+  --max-train 3500 --max-val 600 --max-test 600 \
+  --epochs 30 --batch-size 16 --image-size 256 \
+  --experiment human_unet_baseline \
+  --output-root "/content/drive/MyDrive/CathAction/experiments"
+```
+
+### Phantom segmentation
 
 The combined animal/phantom archive is kept in `data/raw/`, but the setup script
 extracts only its official phantom train and test splits. Existing human data is
@@ -138,7 +180,9 @@ python scripts/evaluate_phantom_unet.py --checkpoint outputs/phantom_unet_subset
 ```
 Cath/
 ├── data/
-│   ├── segmentation/     # train/images, train/labels
+│   ├── segmentation/
+│   │   ├── human/        # train/images, train/labels
+│   │   └── phantom/      # train and official test
 │   └── action/           # training.csv, validation.csv, video_frames/video_*/
 ├── scripts/
 ├── outputs/

@@ -6,6 +6,7 @@ DATA = ROOT / "data"
 OUTPUT = ROOT / "outputs"
 
 SEGMENTATION_DIR = DATA / "segmentation"
+HUMAN_SEGMENTATION_DIR = SEGMENTATION_DIR / "human"
 PHANTOM_SEGMENTATION_DIR = SEGMENTATION_DIR / "phantom"
 ACTION_DIR = DATA / "action"
 FRAMES_DIR = ACTION_DIR / "video_frames"

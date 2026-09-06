@@ -1,7 +1,12 @@
-"""Train a small binary U-Net on CathAction phantom segmentation data."""
+"""Train a small binary U-Net on CathAction human or phantom segmentation data.
+
+The historical filename is retained so existing Colab commands keep working.
+For human experiments, prefer ``train_human_unet.py``.
+"""
 import argparse
 import csv
 import random
+import re
 import sys
 import time
 from pathlib import Path
@@ -17,15 +22,19 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset, Subset
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from config import OUTPUT, PHANTOM_SEGMENTATION_DIR
+from config import HUMAN_SEGMENTATION_DIR, OUTPUT, PHANTOM_SEGMENTATION_DIR
 
 
-class PhantomDataset(Dataset):
-    def __init__(self, split: str, image_size: int = 256):
-        self.image_dir = PHANTOM_SEGMENTATION_DIR / split / "images"
-        self.label_dir = PHANTOM_SEGMENTATION_DIR / split / "labels"
+class SegmentationDataset(Dataset):
+    """Load either CathAction subset while exposing one binary-mask interface."""
+
+    def __init__(self, dataset: str = "phantom", split: str = "train", image_size: int = 256):
+        self.dataset = dataset
+        root = PHANTOM_SEGMENTATION_DIR if dataset == "phantom" else HUMAN_SEGMENTATION_DIR
+        self.image_dir = root / split / "images"
+        self.label_dir = root / split / "labels"
         self.image_size = image_size
-        self.images = sorted(self.image_dir.glob("*.png"))
+        self.images = sorted(path for path in self.image_dir.glob("*") if path.suffix.lower() in {".jpg", ".jpeg", ".png"})
         if not self.images:
             raise FileNotFoundError(f"No images found in {self.image_dir}")
 
@@ -34,9 +43,17 @@ class PhantomDataset(Dataset):
 
     def __getitem__(self, index):
         image_path = self.images[index]
-        label_path = self.label_dir / f"{image_path.stem}.npy"
+        label_path = (
+            self.label_dir / f"{image_path.stem}.npy"
+            if self.dataset == "phantom"
+            else self.label_dir / f"{image_path.stem}_mask.png"
+        )
         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-        mask = np.load(label_path, allow_pickle=False)
+        mask = (
+            np.load(label_path, allow_pickle=False)
+            if label_path.suffix == ".npy"
+            else cv2.imread(str(label_path), cv2.IMREAD_UNCHANGED)
+        )
         if image is None or image.shape[:2] != mask.shape[:2]:
             raise ValueError(f"Invalid image/mask pair: {image_path}, {label_path}")
         image = cv2.resize(image, (self.image_size, self.image_size), interpolation=cv2.INTER_AREA)
@@ -50,6 +67,12 @@ class PhantomDataset(Dataset):
             torch.from_numpy(image.transpose(2, 0, 1)),
             torch.from_numpy(mask.astype(np.float32)).unsqueeze(0),
         )
+
+
+# Backward-compatible alias used by the existing phantom evaluator.
+class PhantomDataset(SegmentationDataset):
+    def __init__(self, split: str, image_size: int = 256):
+        super().__init__("phantom", split, image_size)
 
 
 class DoubleConv(nn.Module):
@@ -119,6 +142,32 @@ def make_subsets(dataset, max_train, max_val, seed):
     return Subset(dataset, train_indices), Subset(dataset, val_indices), train_indices, val_indices
 
 
+def sequence_key(path):
+    """Remove the final frame number so adjacent video frames stay together."""
+    return re.sub(r"-\d+$", "", path.stem)
+
+
+def make_human_subsets(dataset, max_train, max_val, max_test, seed):
+    """Create leakage-resistant train/validation/test subsets by sequence."""
+    groups = {}
+    for index, image in enumerate(dataset.images):
+        groups.setdefault(sequence_key(image), []).append(index)
+    keys = list(groups)
+    random.Random(seed).shuffle(keys)
+    targets = {"test": max_test, "val": max_val, "train": max_train}
+    selected = {name: [] for name in targets}
+    remaining = keys[:]
+    # Fill held-out splits first. Whole sequences can make counts exceed targets.
+    for name in ("test", "val"):
+        while remaining and len(selected[name]) < targets[name]:
+            selected[name].extend(groups[remaining.pop()])
+    while remaining and len(selected["train"]) < targets["train"]:
+        selected["train"].extend(groups[remaining.pop()])
+    if not all(selected.values()):
+        raise ValueError("Not enough human sequences for non-empty train/validation/test splits")
+    return selected
+
+
 def write_manifest(path, dataset, indices):
     with path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
@@ -163,7 +212,7 @@ def plot_history(history, output_dir):
     plt.figure(figsize=(7, 4))
     plt.plot(epochs, [row["train_dice_loss"] for row in history], label="Train")
     plt.plot(epochs, [row["val_dice_loss"] for row in history], label="Validation")
-    plt.xlabel("Epoch"); plt.ylabel("Dice loss"); plt.title("Phantom U-Net training")
+    plt.xlabel("Epoch"); plt.ylabel("Dice loss"); plt.title("U-Net segmentation training")
     plt.grid(alpha=0.3); plt.legend(); plt.tight_layout()
     plt.savefig(output_dir / "loss_curve.png", dpi=150)
     plt.close()
@@ -193,16 +242,19 @@ def plot_predictions(model, loader, device, output_dir, count=4):
     plt.close(fig)
 
 
-def main():
+def main(default_dataset="phantom"):
     parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset", choices=("human", "phantom"), default=default_dataset)
     parser.add_argument("--sanity", action="store_true", help="Use 32 train/16 validation images for 1 epoch")
     parser.add_argument("--max-train", type=int, default=500)
     parser.add_argument("--max-val", type=int, default=100)
+    parser.add_argument("--max-test", type=int, default=500,
+                        help="Human-only held-out test target; whole sequence groups are retained")
     parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--image-size", type=int, default=256)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--experiment", default="phantom_unet_subset")
+    parser.add_argument("--experiment")
     parser.add_argument(
         "--output-root",
         type=Path,
@@ -210,9 +262,11 @@ def main():
     )
     parser.add_argument("--resume", type=Path, help="Resume from an experiment checkpoint")
     args = parser.parse_args()
+    if args.experiment is None:
+        args.experiment = f"{args.dataset}_unet_subset"
     if args.sanity:
-        args.max_train, args.max_val, args.epochs = 32, 16, 1
-        args.experiment = "phantom_unet_sanity"
+        args.max_train, args.max_val, args.max_test, args.epochs = 32, 16, 16, 1
+        args.experiment = f"{args.dataset}_unet_sanity"
     checkpoint = None
     if args.resume:
         if not args.resume.exists():
@@ -221,27 +275,36 @@ def main():
         saved_args = checkpoint["arguments"]
         # Restore all data/model settings. --epochs may extend the original run.
         requested_epochs = args.epochs if "--epochs" in sys.argv else saved_args["epochs"]
-        for name in ("max_train", "max_val", "batch_size", "image_size", "seed", "experiment"):
+        for name in ("dataset", "max_train", "max_val", "max_test", "batch_size", "image_size", "seed", "experiment"):
+            if name not in saved_args:
+                continue
             setattr(args, name, saved_args[name])
         args.epochs = requested_epochs
 
     random.seed(args.seed); np.random.seed(args.seed); torch.manual_seed(args.seed)
 
-    source = PhantomDataset("train", args.image_size)
+    source = SegmentationDataset(args.dataset, "train", args.image_size)
     if checkpoint:
         output_dir = args.resume.resolve().parent
         train_indices = read_manifest(output_dir / "train_files.csv", source)
         val_indices = read_manifest(output_dir / "val_files.csv", source)
         train_data, val_data = Subset(source, train_indices), Subset(source, val_indices)
     else:
-        train_data, val_data, train_indices, val_indices = make_subsets(
-            source, args.max_train, args.max_val, args.seed
-        )
+        if args.dataset == "human":
+            indices = make_human_subsets(source, args.max_train, args.max_val, args.max_test, args.seed)
+            train_indices, val_indices = indices["train"], indices["val"]
+            train_data, val_data = Subset(source, train_indices), Subset(source, val_indices)
+        else:
+            train_data, val_data, train_indices, val_indices = make_subsets(
+                source, args.max_train, args.max_val, args.seed
+            )
         output_root = args.output_root.expanduser() if args.output_root else OUTPUT
         output_dir = output_root / args.experiment
         output_dir.mkdir(parents=True, exist_ok=True)
         write_manifest(output_dir / "train_files.csv", source, train_indices)
         write_manifest(output_dir / "val_files.csv", source, val_indices)
+        if args.dataset == "human":
+            write_manifest(output_dir / "test_files.csv", source, indices["test"])
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_loader = DataLoader(train_data, args.batch_size, shuffle=True, num_workers=0)
@@ -258,7 +321,7 @@ def main():
         print(f"Resuming {args.resume} after epoch {checkpoint['epoch']}")
     best_val = min((row["val_dice_loss"] for row in history), default=float("inf"))
     print(
-        f"device={device}, train={len(train_data)}, val={len(val_data)}, "
+        f"dataset={args.dataset}, device={device}, train={len(train_data)}, val={len(val_data)}, "
         f"epochs={start_epoch}-{args.epochs}"
     )
     if start_epoch > args.epochs:

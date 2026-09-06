@@ -1,4 +1,4 @@
-"""Evaluate a trained binary U-Net once on the official phantom test split."""
+"""Evaluate a binary U-Net on phantom/test or a held-out human manifest."""
 import argparse
 import csv
 import json
@@ -14,7 +14,7 @@ import torch
 from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from train_phantom_unet import PhantomDataset, UNet
+from train_phantom_unet import SegmentationDataset, UNet
 
 
 def binary_metrics(prediction, target, epsilon=1e-6):
@@ -98,7 +98,24 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
     image_size = int(checkpoint.get("arguments", {}).get("image_size", 256))
-    dataset = PhantomDataset("test", image_size)
+    saved_args = checkpoint.get("arguments", {})
+    dataset_name = saved_args.get("dataset", "phantom")
+    if dataset_name == "phantom":
+        dataset = SegmentationDataset("phantom", "test", image_size)
+        split_name = "phantom/test"
+    else:
+        dataset = SegmentationDataset("human", "train", image_size)
+        manifest = args.checkpoint.resolve().parent / "test_files.csv"
+        if not manifest.exists():
+            raise FileNotFoundError(f"Human test manifest not found: {manifest}")
+        with manifest.open(newline="", encoding="utf-8") as file:
+            names = [row["filename"] for row in csv.DictReader(file)]
+        images_by_name = {path.name: path for path in dataset.images}
+        missing = [name for name in names if name not in images_by_name]
+        if missing:
+            raise FileNotFoundError(f"Human test files are missing: {missing[:3]}")
+        dataset.images = [images_by_name[name] for name in names]
+        split_name = "human/held-out-sequences"
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
     model = UNet(3, 1, 16).to(device)
     model.load_state_dict(checkpoint["model_state"])
@@ -136,13 +153,13 @@ def main():
         "image_size": image_size,
         "threshold": args.threshold,
         "device": str(device),
-        "split": "phantom/test",
+        "split": split_name,
     })
     with (output_dir / "test_summary.json").open("w", encoding="utf-8") as file:
         json.dump(summary, file, indent=2)
     plot_examples(collect_examples(model, dataset, device, rows), output_dir / "test_predictions.png")
 
-    print(f"Evaluated {len(dataset):,} phantom test images on {device}")
+    print(f"Evaluated {len(dataset):,} images from {split_name} on {device}")
     print(f"Dice: {summary['dice']['mean']:.4f} mean, {summary['dice']['median']:.4f} median")
     print(f"IoU:  {summary['iou']['mean']:.4f} mean, {summary['iou']['median']:.4f} median")
     print(f"Saved results under {output_dir}")

@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from config import OUTPUT, PHANTOM_SEGMENTATION_DIR, SEGMENTATION_DIR
+from config import HUMAN_SEGMENTATION_DIR, OUTPUT, PHANTOM_SEGMENTATION_DIR
 
 MAX_SAMPLES = 10
 
@@ -60,7 +60,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", choices=("human", "phantom"), default="human")
     args = parser.parse_args()
-    root = PHANTOM_SEGMENTATION_DIR if args.dataset == "phantom" else SEGMENTATION_DIR
+    root = PHANTOM_SEGMENTATION_DIR if args.dataset == "phantom" else HUMAN_SEGMENTATION_DIR
     pairs = list(find_image_label_pairs(root))
     if not pairs:
         print(f"No image/label pairs found under {root}")
