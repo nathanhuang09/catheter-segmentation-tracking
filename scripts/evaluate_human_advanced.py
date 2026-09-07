@@ -60,6 +60,12 @@ def main(required_model=None):
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--manifests-from", type=Path,
                         help="Fallback directory containing test_files.csv")
+    parser.add_argument("--eligible-3frame-only", action="store_true",
+                        help="Evaluate only frames with complete t-4,t-2,t context for matched comparisons")
+    parser.add_argument("--save-probabilities", action="store_true",
+                        help="Save float16 probability maps and filenames for reproducible analysis")
+    parser.add_argument("--qc-csv", type=Path,
+                        help="Prediction-blind annotation_qc.csv; writes a secondary unflagged sensitivity result")
     args = parser.parse_args()
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     saved = checkpoint["arguments"]; kind = checkpoint.get("model_kind", saved.get("model")) or "unet"
@@ -80,14 +86,19 @@ def main(required_model=None):
             "to the U-Net baseline experiment containing test_files.csv."
         )
     names = read_names(manifest)
+    if args.eligible_3frame_only:
+        eligible = ThreeFrameDataset(names, image_size)
+        names = [path.name for path in eligible.images]
     dataset = ThreeFrameDataset(names, image_size) if kind == "unet3" else ManifestDataset(names, image_size)
     loader = DataLoader(dataset, args.batch_size, shuffle=False, num_workers=0, pin_memory=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = build_model(kind, model_name).to(device); model.load_state_dict(checkpoint["model_state"]); model.eval()
-    rows = []; offset = 0
+    rows = []; offset = 0; saved_probabilities = []
     with torch.no_grad():
         for images, targets in loader:
             probabilities = torch.sigmoid(model(images.to(device))).cpu(); predictions = probabilities >= args.threshold
+            if args.save_probabilities:
+                saved_probabilities.append(probabilities[:, 0].numpy().astype(np.float16))
             metrics = binary_metrics(predictions, targets)
             for index in range(len(images)):
                 row = {"filename": dataset.images[offset + index].name}
@@ -96,15 +107,34 @@ def main(required_model=None):
                 row["predicted_pixels"] = int(metrics["predicted_pixels"][index])
                 row["target_pixels"] = int(metrics["target_pixels"][index]); rows.append(row)
             offset += len(images)
-    output = args.output_dir or args.checkpoint.resolve().parent / "test_evaluation"; output.mkdir(parents=True, exist_ok=True)
+    default_name = "test_evaluation_3frame_matched" if args.eligible_3frame_only else "test_evaluation"
+    output = args.output_dir or args.checkpoint.resolve().parent / default_name; output.mkdir(parents=True, exist_ok=True)
     with (output / "test_metrics.csv").open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=rows[0].keys()); writer.writeheader(); writer.writerows(rows)
     summary = summarize(rows); summary.update({"model": kind, "checkpoint": str(args.checkpoint),
         "checkpoint_epoch": checkpoint["epoch"], "threshold": args.threshold, "image_size": image_size,
-        "device": str(device), "split": "human/held-out-sequences"})
+        "device": str(device), "split": "human/held-out-sequences",
+        "eligible_3frame_only": args.eligible_3frame_only, "manifest": str(manifest)})
     with (output / "test_summary.json").open("w", encoding="utf-8") as file: json.dump(summary, file, indent=2)
+    if args.qc_csv:
+        with args.qc_csv.open(newline="", encoding="utf-8") as file:
+            flagged = {row["filename"] for row in csv.DictReader(file) if row.get("flags")}
+        retained = [row for row in rows if row["filename"] not in flagged]
+        if not retained:
+            raise ValueError("QC criteria excluded every evaluated frame")
+        sensitivity = summarize(retained)
+        sensitivity.update({"primary_result": False, "retained_frames": len(retained),
+                            "excluded_flagged_frames": len(rows) - len(retained),
+                            "qc_csv": str(args.qc_csv),
+                            "note": "Secondary sensitivity analysis; primary result is the untouched test set."})
+        with (output / "test_summary_qc_sensitivity.json").open("w", encoding="utf-8") as file:
+            json.dump(sensitivity, file, indent=2)
     examples = scored_examples(model, dataset, rows, kind, device, args.threshold)
     plot_scored_examples(examples, output / "test_predictions.png")
+    if args.save_probabilities:
+        np.savez_compressed(output / "test_probabilities.npz",
+                            filenames=np.asarray([row["filename"] for row in rows]),
+                            probabilities=np.concatenate(saved_probabilities))
     print(f"Evaluated {len(dataset):,} {kind} test frames on {device}")
     print(f"Dice={summary['dice']['mean']:.4f} IoU={summary['iou']['mean']:.4f}")
     print(f"Saved under {output}")

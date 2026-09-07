@@ -22,8 +22,9 @@ from human_models import build_model
 from train_phantom_unet import SegmentationDataset
 
 
-def make_dataset(kind, names, image_size):
-    return ThreeFrameDataset(names, image_size) if kind == "unet3" else ManifestDataset(names, image_size)
+def make_dataset(kind, names, image_size, augment=False):
+    return (ThreeFrameDataset(names, image_size, augment=augment) if kind == "unet3"
+            else ManifestDataset(names, image_size, augment=augment))
 
 
 @torch.no_grad()
@@ -87,6 +88,10 @@ def parse_args(default_model=None):
     parser.add_argument("--output-root", type=Path)
     parser.add_argument("--manifests-from", type=Path,
                         help="Reuse train/val/test CSVs from the U-Net experiment")
+    parser.add_argument("--split-strategy", choices=("prefix_stratified", "sequence_random"),
+                        default="prefix_stratified")
+    parser.add_argument("--augment", action="store_true",
+                        help="Apply moderate paired geometry/intensity augmentation to training only")
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--sanity", action="store_true")
     return parser.parse_args()
@@ -118,8 +123,9 @@ def main(default_model=None):
         manifests = {split: read_names(output_dir / f"{split}_files.csv") for split in ("train", "val", "test")}
     else:
         manifests = prepare_manifests(source, output_dir, args.max_train, args.max_val,
-                                      args.max_test, args.seed, args.manifests_from)
-    train_data = make_dataset(args.model, manifests["train"], args.image_size)
+                                      args.max_test, args.seed, args.manifests_from,
+                                      args.split_strategy)
+    train_data = make_dataset(args.model, manifests["train"], args.image_size, augment=args.augment)
     val_data = make_dataset(args.model, manifests["val"], args.image_size)
     train_loader = DataLoader(train_data, args.batch_size, shuffle=True, num_workers=0, pin_memory=True)
     val_loader = DataLoader(val_data, args.batch_size, shuffle=False, num_workers=0, pin_memory=True)

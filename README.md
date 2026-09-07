@@ -177,24 +177,36 @@ python scripts/evaluate_phantom_unet.py --checkpoint outputs/phantom_unet_subset
 
 ## Human model comparison
 
-Keep one sequence-grouped split fixed across the single-frame U-Net,
-SegFormer-B0, and causal three-frame U-Net. Point `--manifests-from` at the
-completed single-frame U-Net experiment so every model receives the same
-train/validation/test filenames.
+The default splitter keeps recordings intact and balances the JFQ/TQY/WJZ
+prefixes approximately across splits. Preserve the resulting CSV manifests for
+every comparison. First run a controlled augmentation ablation on one split:
 
 ```bash
-# Pretrained SegFormer-B0 (tune/stop on validation loss)
+# Split reference: no augmentation
+python scripts/train_human_unet.py \
+  --epochs 100 --batch-size 16 --image-size 256 \
+  --experiment human_unet_stratified_noaug_v4 \
+  --output-root "/content/drive/MyDrive/CathAction/experiments"
+
+# Same filenames and settings, moderate training-only augmentation
+python scripts/train_human_unet.py \
+  --manifests-from "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_noaug_v4" \
+  --augment --epochs 100 --batch-size 16 --image-size 256 \
+  --experiment human_unet_stratified_aug_v4 \
+  --output-root "/content/drive/MyDrive/CathAction/experiments"
+
+# Pretrained SegFormer-B0, same split and augmentation policy
 python scripts/train_human_segformer.py \
-  --manifests-from "/content/drive/MyDrive/CathAction/experiments/human_unet_baseline_v2" \
-  --epochs 100 --batch-size 8 --image-size 256 \
-  --experiment human_segformer_b0 \
+  --manifests-from "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_noaug_v4" \
+  --augment --epochs 100 --batch-size 8 --image-size 256 \
+  --experiment human_segformer_stratified_aug_v4 \
   --output-root "/content/drive/MyDrive/CathAction/experiments"
 
 # Causal grayscale channels: t-4, t-2, t; target mask: t
 python scripts/train_human_3frame_unet.py \
-  --manifests-from "/content/drive/MyDrive/CathAction/experiments/human_unet_baseline_v2" \
-  --epochs 150 --batch-size 16 --image-size 256 \
-  --experiment human_unet_3frame \
+  --manifests-from "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_noaug_v4" \
+  --augment --epochs 150 --batch-size 16 --image-size 256 \
+  --experiment human_unet_3frame_stratified_aug_v4 \
   --output-root "/content/drive/MyDrive/CathAction/experiments"
 ```
 
@@ -204,30 +216,50 @@ outputs. Use `--bce-weight 0.5` to experiment with Dice+BCE, but keep the loss
 identical when making the primary architecture comparison.
 
 ```bash
+python scripts/evaluate_human_unet.py \
+  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_aug_v4/best_model.pt" \
+  --eligible-3frame-only --save-probabilities
 python scripts/evaluate_human_segformer.py \
-  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_segformer_b0/best_model.pt"
+  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_segformer_stratified_aug_v4/best_model.pt" \
+  --eligible-3frame-only --save-probabilities
 python scripts/evaluate_human_3frame_unet.py \
-  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_3frame/best_model.pt"
+  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_3frame_stratified_aug_v4/best_model.pt" \
+  --eligible-3frame-only --save-probabilities
 ```
 
-For a segmentation-level temporal comparison, the mask Kalman script aligns the
-previous probability field to the current frame with optical flow, then applies
-a scalar Kalman update at every pixel. It creates a new filtered mask and reports
-raw versus filtered Dice, IoU, precision, and recall. Tune its noise parameters
-on validation data first; only then run frozen settings on the held-out test.
+`audit_human_annotations.py` performs prediction-blind annotation screening.
+Flags are candidates for manual review, not automatic exclusions; retain the
+untouched test score as the primary result.
 
 ```bash
-python scripts/evaluate_human_unet_mask_kalman.py \
-  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_baseline_v2/best_model.pt" \
-  --split val
-
-python scripts/evaluate_human_unet_mask_kalman.py \
-  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_baseline_v2/best_model.pt" \
+python scripts/audit_human_annotations.py \
+  --manifests-from "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_noaug_v4" \
   --split test
 ```
 
-`evaluate_human_unet_kalman.py` remains available as an optional point-tracking
-experiment. It filters a skeleton-derived tip and does not change mask Dice.
+After reviewing and freezing the QC rules, pass its `annotation_qc.csv` to an
+evaluator with `--qc-csv`. This adds a secondary unflagged sensitivity summary
+while still retaining and reporting the full test set as the primary result.
+
+The recommended physics-informed temporal experiment filters an ordered
+centerline with a constant-velocity state model, maximum-speed gating, spatial
+smoothness, and a slowly adapting inextensible-chain constraint. It reports
+centerline and tip errors as primary tracking outcomes plus a secondary Dice
+score for a mask reconstructed from that centerline. Tune only on validation,
+freeze the parameters, then run test once.
+
+```bash
+python scripts/evaluate_human_unet_centerline_kalman.py \
+  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_aug_v4/best_model.pt" \
+  --split val
+python scripts/evaluate_human_unet_centerline_kalman.py \
+  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_aug_v4/best_model.pt" \
+  --split test
+```
+
+The old per-pixel mask Kalman script remains for documenting the negative
+ablation, but is no longer the recommended physics model: independent pixel
+states do not represent a moving thin catheter.
 
 ## 6. Folder layout (target)
 
