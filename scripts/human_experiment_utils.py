@@ -50,6 +50,7 @@ def prepare_manifests(source, output_dir: Path, max_train: int, max_val: int,
                 f"Sequence leakage in {manifests_from}: {bad}. "
                 "Regenerate the baseline manifests with the corrected splitter."
             )
+        for split, names in result.items():
             with (output_dir / f"{split}_files.csv").open("w", newline="", encoding="utf-8") as file:
                 writer = csv.writer(file); writer.writerow(["filename"])
                 writer.writerows([[name] for name in names])

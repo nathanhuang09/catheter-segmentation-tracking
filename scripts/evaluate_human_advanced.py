@@ -58,13 +58,28 @@ def main(required_model=None):
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--threshold", type=float, default=.5)
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--manifests-from", type=Path,
+                        help="Fallback directory containing test_files.csv")
     args = parser.parse_args()
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     saved = checkpoint["arguments"]; kind = checkpoint.get("model_kind", saved.get("model")) or "unet"
     if required_model and kind != required_model:
         raise ValueError(f"Expected a {required_model} checkpoint, found {kind}")
     image_size = int(saved["image_size"]); model_name = saved.get("model_name", "nvidia/mit-b0")
-    names = read_names(args.checkpoint.resolve().parent / "test_files.csv")
+    local_manifest = args.checkpoint.resolve().parent / "test_files.csv"
+    saved_manifest_root = saved.get("manifests_from")
+    fallback_root = args.manifests_from or (Path(saved_manifest_root) if saved_manifest_root else None)
+    if local_manifest.exists():
+        manifest = local_manifest
+    elif fallback_root and (fallback_root / "test_files.csv").exists():
+        manifest = fallback_root / "test_files.csv"
+        print(f"Using fallback test manifest: {manifest}")
+    else:
+        raise FileNotFoundError(
+            f"No test manifest at {local_manifest}. Pass --manifests-from pointing "
+            "to the U-Net baseline experiment containing test_files.csv."
+        )
+    names = read_names(manifest)
     dataset = ThreeFrameDataset(names, image_size) if kind == "unet3" else ManifestDataset(names, image_size)
     loader = DataLoader(dataset, args.batch_size, shuffle=False, num_workers=0, pin_memory=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
