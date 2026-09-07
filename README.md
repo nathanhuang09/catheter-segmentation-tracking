@@ -175,6 +175,56 @@ once on the official phantom test split:
 python scripts/evaluate_phantom_unet.py --checkpoint outputs/phantom_unet_subset/best_model.pt
 ```
 
+## Human model comparison
+
+Keep one sequence-grouped split fixed across the single-frame U-Net,
+SegFormer-B0, and causal three-frame U-Net. Point `--manifests-from` at the
+completed single-frame U-Net experiment so every model receives the same
+train/validation/test filenames.
+
+```bash
+# Pretrained SegFormer-B0 (tune/stop on validation loss)
+python scripts/train_human_segformer.py \
+  --manifests-from "/content/drive/MyDrive/CathAction/experiments/human_unet_baseline_v2" \
+  --epochs 100 --batch-size 8 --image-size 256 \
+  --experiment human_segformer_b0 \
+  --output-root "/content/drive/MyDrive/CathAction/experiments"
+
+# Causal grayscale channels: t-4, t-2, t; target mask: t
+python scripts/train_human_3frame_unet.py \
+  --manifests-from "/content/drive/MyDrive/CathAction/experiments/human_unet_baseline_v2" \
+  --epochs 150 --batch-size 16 --image-size 256 \
+  --experiment human_unet_3frame \
+  --output-root "/content/drive/MyDrive/CathAction/experiments"
+```
+
+Both trainers use AdamW, Dice loss by default, mixed precision on CUDA, cosine
+learning-rate decay, early stopping, resumable checkpoints, and Drive-safe
+outputs. Use `--bce-weight 0.5` to experiment with Dice+BCE, but keep the loss
+identical when making the primary architecture comparison.
+
+```bash
+python scripts/evaluate_human_segformer.py \
+  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_segformer_b0/best_model.pt"
+python scripts/evaluate_human_3frame_unet.py \
+  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_3frame/best_model.pt"
+```
+
+The Kalman script derives a tip from the largest predicted component, applies a
+constant-velocity filter with speed and innovation gates, and reports raw versus
+filtered tip error and jitter. Tune its parameters on validation data first;
+only then run the frozen settings on the held-out test split.
+
+```bash
+python scripts/evaluate_human_unet_kalman.py \
+  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_baseline_v2/best_model.pt" \
+  --split val
+
+python scripts/evaluate_human_unet_kalman.py \
+  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_baseline_v2/best_model.pt" \
+  --split test
+```
+
 ## 6. Folder layout (target)
 
 ```

@@ -1,0 +1,75 @@
+"""Evaluate SegFormer or three-frame U-Net on held-out human sequences."""
+import argparse
+import csv
+import json
+import sys
+from pathlib import Path
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from evaluate_phantom_unet import binary_metrics, summarize
+from human_experiment_utils import ManifestDataset, ThreeFrameDataset, read_names
+from human_models import build_model
+
+
+def main(required_model=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--threshold", type=float, default=.5)
+    parser.add_argument("--output-dir", type=Path)
+    args = parser.parse_args()
+    checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    saved = checkpoint["arguments"]; kind = checkpoint.get("model_kind", saved.get("model")) or "unet"
+    if required_model and kind != required_model:
+        raise ValueError(f"Expected a {required_model} checkpoint, found {kind}")
+    image_size = int(saved["image_size"]); model_name = saved.get("model_name", "nvidia/mit-b0")
+    names = read_names(args.checkpoint.resolve().parent / "test_files.csv")
+    dataset = ThreeFrameDataset(names, image_size) if kind == "unet3" else ManifestDataset(names, image_size)
+    loader = DataLoader(dataset, args.batch_size, shuffle=False, num_workers=0, pin_memory=True)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = build_model(kind, model_name).to(device); model.load_state_dict(checkpoint["model_state"]); model.eval()
+    rows = []; examples = []; offset = 0
+    with torch.no_grad():
+        for images, targets in loader:
+            probabilities = torch.sigmoid(model(images.to(device))).cpu(); predictions = probabilities >= args.threshold
+            metrics = binary_metrics(predictions, targets)
+            for index in range(len(images)):
+                row = {"filename": dataset.images[offset + index].name}
+                for key in ("dice", "iou", "precision", "recall"):
+                    row[key] = float(metrics[key][index])
+                row["predicted_pixels"] = int(metrics["predicted_pixels"][index])
+                row["target_pixels"] = int(metrics["target_pixels"][index]); rows.append(row)
+                if len(examples) < 8:
+                    shown = images[index, -1].numpy() if kind == "unet3" else images[index].permute(1, 2, 0).numpy()
+                    examples.append((shown, targets[index, 0].numpy(), probabilities[index, 0].numpy()))
+            offset += len(images)
+    output = args.output_dir or args.checkpoint.resolve().parent / "test_evaluation"; output.mkdir(parents=True, exist_ok=True)
+    with (output / "test_metrics.csv").open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=rows[0].keys()); writer.writeheader(); writer.writerows(rows)
+    summary = summarize(rows); summary.update({"model": kind, "checkpoint": str(args.checkpoint),
+        "checkpoint_epoch": checkpoint["epoch"], "threshold": args.threshold, "image_size": image_size,
+        "device": str(device), "split": "human/held-out-sequences"})
+    with (output / "test_summary.json").open("w", encoding="utf-8") as file: json.dump(summary, file, indent=2)
+    fig, axes = plt.subplots(len(examples), 4, figsize=(12, 3 * len(examples)), squeeze=False)
+    for row, (image, target, probability) in enumerate(examples):
+        if image.ndim == 2: image = np.repeat(image[..., None], 3, axis=2)
+        for axis, data, title, cmap in zip(axes[row], (image, target, probability, probability >= args.threshold),
+                                          ("Image", "Ground truth", "Probability", "Prediction"),
+                                          (None, "gray", "magma", "gray")):
+            axis.imshow(data, cmap=cmap, vmin=0 if cmap else None, vmax=1 if cmap else None)
+            axis.set_title(title); axis.axis("off")
+    fig.tight_layout(); fig.savefig(output / "test_predictions.png", dpi=150, bbox_inches="tight"); plt.close(fig)
+    print(f"Evaluated {len(dataset):,} {kind} test frames on {device}")
+    print(f"Dice={summary['dice']['mean']:.4f} IoU={summary['iou']['mean']:.4f}")
+    print(f"Saved under {output}")
+
+
+if __name__ == "__main__":
+    main()

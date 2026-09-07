@@ -144,7 +144,9 @@ def make_subsets(dataset, max_train, max_val, seed):
 
 def sequence_key(path):
     """Remove the final frame number so adjacent video frames stay together."""
-    return re.sub(r"-\d+$", "", path.stem)
+    # A small WJZ recording has an additional constant suffix, e.g.
+    # ``...-00042_00001.jpg``; it still belongs to one temporal sequence.
+    return re.sub(r"-\d+(?:_\d+)?$", "", path.stem)
 
 
 def make_human_subsets(dataset, max_train, max_val, max_test, seed):
