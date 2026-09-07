@@ -210,20 +210,24 @@ python scripts/evaluate_human_3frame_unet.py \
   --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_3frame/best_model.pt"
 ```
 
-The Kalman script derives a tip from the largest predicted component, applies a
-constant-velocity filter with speed and innovation gates, and reports raw versus
-filtered tip error and jitter. Tune its parameters on validation data first;
-only then run the frozen settings on the held-out test split.
+For a segmentation-level temporal comparison, the mask Kalman script aligns the
+previous probability field to the current frame with optical flow, then applies
+a scalar Kalman update at every pixel. It creates a new filtered mask and reports
+raw versus filtered Dice, IoU, precision, and recall. Tune its noise parameters
+on validation data first; only then run frozen settings on the held-out test.
 
 ```bash
-python scripts/evaluate_human_unet_kalman.py \
+python scripts/evaluate_human_unet_mask_kalman.py \
   --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_baseline_v2/best_model.pt" \
   --split val
 
-python scripts/evaluate_human_unet_kalman.py \
+python scripts/evaluate_human_unet_mask_kalman.py \
   --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_baseline_v2/best_model.pt" \
   --split test
 ```
+
+`evaluate_human_unet_kalman.py` remains available as an optional point-tracking
+experiment. It filters a skeleton-derived tip and does not change mask Dice.
 
 ## 6. Folder layout (target)
 
