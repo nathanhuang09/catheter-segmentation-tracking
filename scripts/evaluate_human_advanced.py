@@ -18,6 +18,40 @@ from human_experiment_utils import ManifestDataset, ThreeFrameDataset, read_name
 from human_models import build_model
 
 
+@torch.no_grad()
+def scored_examples(model, dataset, rows, kind, device, threshold):
+    """Load worst/median/best non-empty test examples ranked by Dice."""
+    candidates = [index for index, row in enumerate(rows) if row["target_pixels"] > 0]
+    if not candidates:
+        candidates = list(range(len(rows)))
+    ordered = sorted(candidates, key=lambda index: rows[index]["dice"])
+    selected = [ordered[0], ordered[len(ordered) // 2], ordered[-1]]
+    examples = []
+    for label, index in zip(("Worst", "Median", "Best"), selected):
+        image, target = dataset[index]
+        probability = torch.sigmoid(model(image.unsqueeze(0).to(device)))[0, 0].cpu().numpy()
+        shown = image[-1].numpy() if kind == "unet3" else image.permute(1, 2, 0).numpy()
+        examples.append((label, rows[index]["filename"], rows[index]["dice"],
+                         shown, target[0].numpy(), probability, probability >= threshold))
+    return examples
+
+
+def plot_scored_examples(examples, path):
+    fig, axes = plt.subplots(len(examples), 5, figsize=(15, 3 * len(examples)), squeeze=False)
+    for row, (label, filename, dice, image, target, probability, prediction) in enumerate(examples):
+        if image.ndim == 2:
+            image = np.repeat(image[..., None], 3, axis=2)
+        overlay = image.copy()
+        overlay[prediction] = .45 * overlay[prediction] + .55 * np.array([0, 1, 0])
+        items = ((image, f"{label}: {filename}\nDice={dice:.3f}", None),
+                 (target, "Ground truth", "gray"), (probability, "Probability", "magma"),
+                 (prediction, "Prediction", "gray"), (overlay, "Prediction overlay", None))
+        for axis, (data, title, cmap) in zip(axes[row], items):
+            axis.imshow(data, cmap=cmap, vmin=0 if cmap else None, vmax=1 if cmap else None)
+            axis.set_title(title); axis.axis("off")
+    fig.tight_layout(); fig.savefig(path, dpi=150, bbox_inches="tight"); plt.close(fig)
+
+
 def main(required_model=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=Path, required=True)
@@ -35,7 +69,7 @@ def main(required_model=None):
     loader = DataLoader(dataset, args.batch_size, shuffle=False, num_workers=0, pin_memory=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = build_model(kind, model_name).to(device); model.load_state_dict(checkpoint["model_state"]); model.eval()
-    rows = []; examples = []; offset = 0
+    rows = []; offset = 0
     with torch.no_grad():
         for images, targets in loader:
             probabilities = torch.sigmoid(model(images.to(device))).cpu(); predictions = probabilities >= args.threshold
@@ -46,9 +80,6 @@ def main(required_model=None):
                     row[key] = float(metrics[key][index])
                 row["predicted_pixels"] = int(metrics["predicted_pixels"][index])
                 row["target_pixels"] = int(metrics["target_pixels"][index]); rows.append(row)
-                if len(examples) < 8:
-                    shown = images[index, -1].numpy() if kind == "unet3" else images[index].permute(1, 2, 0).numpy()
-                    examples.append((shown, targets[index, 0].numpy(), probabilities[index, 0].numpy()))
             offset += len(images)
     output = args.output_dir or args.checkpoint.resolve().parent / "test_evaluation"; output.mkdir(parents=True, exist_ok=True)
     with (output / "test_metrics.csv").open("w", newline="", encoding="utf-8") as file:
@@ -57,15 +88,8 @@ def main(required_model=None):
         "checkpoint_epoch": checkpoint["epoch"], "threshold": args.threshold, "image_size": image_size,
         "device": str(device), "split": "human/held-out-sequences"})
     with (output / "test_summary.json").open("w", encoding="utf-8") as file: json.dump(summary, file, indent=2)
-    fig, axes = plt.subplots(len(examples), 4, figsize=(12, 3 * len(examples)), squeeze=False)
-    for row, (image, target, probability) in enumerate(examples):
-        if image.ndim == 2: image = np.repeat(image[..., None], 3, axis=2)
-        for axis, data, title, cmap in zip(axes[row], (image, target, probability, probability >= args.threshold),
-                                          ("Image", "Ground truth", "Probability", "Prediction"),
-                                          (None, "gray", "magma", "gray")):
-            axis.imshow(data, cmap=cmap, vmin=0 if cmap else None, vmax=1 if cmap else None)
-            axis.set_title(title); axis.axis("off")
-    fig.tight_layout(); fig.savefig(output / "test_predictions.png", dpi=150, bbox_inches="tight"); plt.close(fig)
+    examples = scored_examples(model, dataset, rows, kind, device, args.threshold)
+    plot_scored_examples(examples, output / "test_predictions.png")
     print(f"Evaluated {len(dataset):,} {kind} test frames on {device}")
     print(f"Dice={summary['dice']['mean']:.4f} IoU={summary['iou']['mean']:.4f}")
     print(f"Saved under {output}")
