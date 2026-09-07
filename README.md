@@ -208,6 +208,13 @@ python scripts/train_human_3frame_unet.py \
   --augment --epochs 150 --batch-size 16 --image-size 256 \
   --experiment human_unet_3frame_stratified_aug_v4 \
   --output-root "/content/drive/MyDrive/CathAction/experiments"
+
+# Shared encoder per frame with learned temporal fusion at every U-Net scale
+python scripts/train_human_temporal_unet.py \
+  --manifests-from "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_noaug_v4" \
+  --augment --epochs 150 --batch-size 8 --image-size 256 \
+  --experiment human_temporal_unet_stratified_aug_v4 \
+  --output-root "/content/drive/MyDrive/CathAction/experiments"
 ```
 
 Both trainers use AdamW, Dice loss by default, mixed precision on CUDA, cosine
@@ -225,7 +232,17 @@ python scripts/evaluate_human_segformer.py \
 python scripts/evaluate_human_3frame_unet.py \
   --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_3frame_stratified_aug_v4/best_model.pt" \
   --eligible-3frame-only --save-probabilities
+python scripts/evaluate_human_temporal_unet.py \
+  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_temporal_unet_stratified_aug_v4/best_model.pt" \
+  --eligible-3frame-only --save-probabilities
 ```
+
+The channel-stacked model mixes time in its first convolution. The shared-
+encoder model instead applies identical encoder weights to each grayscale frame
+and fuses ordered features plus current-versus-past feature differences at all
+five resolutions. Both use the same
+`t-4,t-2,t` samples, targets, loss, augmentation, and split, isolating the
+effect of the temporal architecture.
 
 `audit_human_annotations.py` performs prediction-blind annotation screening.
 Flags are candidates for manual review, not automatic exclusions; retain the

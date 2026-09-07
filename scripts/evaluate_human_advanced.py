@@ -30,7 +30,7 @@ def scored_examples(model, dataset, rows, kind, device, threshold):
     for label, index in zip(("Worst", "Median", "Best"), selected):
         image, target = dataset[index]
         probability = torch.sigmoid(model(image.unsqueeze(0).to(device)))[0, 0].cpu().numpy()
-        shown = image[-1].numpy() if kind == "unet3" else image.permute(1, 2, 0).numpy()
+        shown = image[-1].numpy() if kind in {"unet3", "temporal_unet"} else image.permute(1, 2, 0).numpy()
         examples.append((label, rows[index]["filename"], rows[index]["dice"],
                          shown, target[0].numpy(), probability, probability >= threshold))
     return examples
@@ -89,7 +89,8 @@ def main(required_model=None):
     if args.eligible_3frame_only:
         eligible = ThreeFrameDataset(names, image_size)
         names = [path.name for path in eligible.images]
-    dataset = ThreeFrameDataset(names, image_size) if kind == "unet3" else ManifestDataset(names, image_size)
+    dataset = (ThreeFrameDataset(names, image_size) if kind in {"unet3", "temporal_unet"}
+               else ManifestDataset(names, image_size))
     loader = DataLoader(dataset, args.batch_size, shuffle=False, num_workers=0, pin_memory=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = build_model(kind, model_name).to(device); model.load_state_dict(checkpoint["model_state"]); model.eval()

@@ -23,7 +23,7 @@ from train_phantom_unet import SegmentationDataset
 
 
 def make_dataset(kind, names, image_size, augment=False):
-    return (ThreeFrameDataset(names, image_size, augment=augment) if kind == "unet3"
+    return (ThreeFrameDataset(names, image_size, augment=augment) if kind in {"unet3", "temporal_unet"}
             else ManifestDataset(names, image_size, augment=augment))
 
 
@@ -55,7 +55,7 @@ def plot_predictions(model, loader, device, path, model_kind):
     model.eval(); images, masks = next(iter(loader)); probabilities = torch.sigmoid(model(images.to(device))).cpu()
     count = min(4, len(images)); fig, axes = plt.subplots(count, 4, figsize=(12, 3 * count), squeeze=False)
     for row in range(count):
-        shown = images[row, -1].numpy() if model_kind == "unet3" else images[row].permute(1, 2, 0).numpy()
+        shown = images[row, -1].numpy() if model_kind in {"unet3", "temporal_unet"} else images[row].permute(1, 2, 0).numpy()
         if shown.ndim == 2:
             shown = np.repeat(shown[..., None], 3, axis=2)
         items = ((shown, "Current image", None), (masks[row, 0], "Ground truth", "gray"),
@@ -69,7 +69,8 @@ def plot_predictions(model, loader, device, path, model_kind):
 
 def parse_args(default_model=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("unet", "segformer", "unet3"), default=default_model, required=default_model is None)
+    parser.add_argument("--model", choices=("unet", "segformer", "unet3", "temporal_unet"),
+                        default=default_model, required=default_model is None)
     parser.add_argument("--model-name", default="nvidia/mit-b0")
     parser.add_argument("--max-train", type=int, default=3500)
     parser.add_argument("--max-val", type=int, default=600)
@@ -101,7 +102,7 @@ def main(default_model=None):
     args = parse_args(default_model)
     if args.experiment is None:
         defaults = {"unet": "human_unet_baseline", "segformer": "human_segformer_b0",
-                    "unet3": "human_unet_3frame"}
+                    "unet3": "human_unet_3frame", "temporal_unet": "human_temporal_unet"}
         args.experiment = defaults[args.model]
     if args.sanity:
         args.max_train, args.max_val, args.max_test, args.epochs = 64, 32, 32, 1
