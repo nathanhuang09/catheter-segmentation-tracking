@@ -296,6 +296,21 @@ exactly. Its primary architecture table contains Dice, IoU, precision, and
 recall. Kalman centerline/tip errors are reported separately because those are
 tracking outcomes rather than full-mask segmentation metrics.
 
+Create a compact ZIP for analysis or sharing after the evaluations finish:
+
+```bash
+python scripts/package_human_results.py \
+  --experiments-root "/content/drive/MyDrive/CathAction/experiments" \
+  --output "/content/drive/MyDrive/CathAction/human_results_bundle.zip"
+```
+
+By default it includes CSV/JSON results, manifests, histories, plots, annotation
+audits, comparison outputs, and relevant source code from every experiment
+folder. It excludes `.pt` checkpoints and `.npz` probability maps because those
+can make the archive unnecessarily large. Select folders with repeated
+`--experiment NAME`, or explicitly opt into large files with
+`--include-probabilities` or `--include-checkpoints`.
+
 ## 6. Folder layout (target)
 
 ```
