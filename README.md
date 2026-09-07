@@ -278,6 +278,24 @@ The old per-pixel mask Kalman script remains for documenting the negative
 ablation, but is no longer the recommended physics model: independent pixel
 states do not represent a moving thin catheter.
 
+After all matched evaluations finish, generate one verified comparison with
+paired differences and 95% sequence-clustered bootstrap confidence intervals:
+
+```bash
+python scripts/compare_human_experiments.py \
+  --unet "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_aug_v4" \
+  --segformer "/content/drive/MyDrive/CathAction/experiments/human_segformer_stratified_aug_v4" \
+  --three-frame "/content/drive/MyDrive/CathAction/experiments/human_unet_3frame_stratified_aug_v4" \
+  --temporal-unet "/content/drive/MyDrive/CathAction/experiments/human_temporal_unet_stratified_aug_v4" \
+  --kalman "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_aug_v4" \
+  --output-dir "/content/drive/MyDrive/CathAction/experiments/human_model_comparison_v4"
+```
+
+The script refuses to compare architectures unless their filename sets match
+exactly. Its primary architecture table contains Dice, IoU, precision, and
+recall. Kalman centerline/tip errors are reported separately because those are
+tracking outcomes rather than full-mask segmentation metrics.
+
 ## 6. Folder layout (target)
 
 ```

@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from evaluate_human_unet_kalman import TipKalman, skeletonize
-from human_experiment_utils import ManifestDataset, frame_number, read_names, sequence_key
+from human_experiment_utils import ManifestDataset, ThreeFrameDataset, frame_number, read_names, sequence_key
 from train_phantom_unet import UNet
 
 
@@ -101,12 +101,17 @@ def main():
     parser.add_argument("--max-speed", type=float, default=12.0)
     parser.add_argument("--length-adaptation", type=float, default=.05,
                         help="Slow update rate for the catheter segment-length constraint")
+    parser.add_argument("--eligible-3frame-only", action="store_true",
+                        help="Use only frames having t-4,t-2,t for comparison with temporal models")
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args()
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     saved = checkpoint.get("arguments", {}); root = args.checkpoint.resolve().parent
     image_size = int(saved.get("image_size", 256))
-    dataset = ManifestDataset(read_names(root / f"{args.split}_files.csv"), image_size)
+    names = read_names(root / f"{args.split}_files.csv")
+    if args.eligible_3frame_only:
+        names = [path.name for path in ThreeFrameDataset(names, image_size).images]
+    dataset = ManifestDataset(names, image_size)
     loader = DataLoader(dataset, args.batch_size, shuffle=False, num_workers=0)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = UNet(3, 1, 16).to(device); model.load_state_dict(checkpoint["model_state"]); model.eval()
@@ -186,7 +191,8 @@ def main():
                          "raw_pixels": int(raw_mask.sum()), "filtered_pixels": int(filtered_mask.sum()),
                          "target_pixels": int(target_mask.sum())})
             previous_frame = frame
-    output = args.output_dir or root / f"centerline_kalman_{args.split}"
+    suffix = "_3frame_matched" if args.eligible_3frame_only else ""
+    output = args.output_dir or root / f"centerline_kalman_{args.split}{suffix}"
     output.mkdir(parents=True, exist_ok=True)
     with (output / "centerline_metrics.csv").open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=rows[0].keys()); writer.writeheader(); writer.writerows(rows)
