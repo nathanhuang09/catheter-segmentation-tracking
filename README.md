@@ -322,12 +322,18 @@ python scripts/make_human_qualitative_figure.py \
 
 python scripts/make_human_qualitative_figure.py \
   --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_aug_v4/best_model.pt" \
-  --filename "PASTE_ONE_FILENAME_FROM_candidate_examples.csv"
+  --filename "PASTE_ONE_FILENAME_FROM_candidate_examples.csv" \
+  --min-dice 0.70 --max-dice 0.90 --style overlay-errors
 ```
 
 The default panel order is input image, U-Net prediction, and ground truth
 (evaluation only). It exports a 300-DPI PNG, vector PDF, and JSON provenance
 record without changing the annotation, prediction, or 0.5 threshold.
+With `--style overlay-errors`, all panels retain the original fluoroscopy
+background: prediction is green in the middle panel, while the final comparison
+uses green for true positives, red for false positives, and blue for false
+negatives. The selected figure has only panel titles; filename and Dice remain
+in its JSON provenance and should be stated in the caption.
 
 ## 6. Folder layout (target)
 
