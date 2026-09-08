@@ -335,6 +335,24 @@ uses green for true positives, red for false positives, and blue for false
 negatives. The selected figure has only panel titles; filename and Dice remain
 in its JSON provenance and should be stated in the caption.
 
+Generate slide-ready augmentation and temporal-method visuals from actual
+training-manifest frames:
+
+```bash
+python scripts/make_augmentation_figure.py \
+  --manifests-from "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_noaug_v4"
+
+python scripts/make_temporal_unet_diagram.py \
+  --manifests-from "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_noaug_v4" \
+  --split train
+```
+
+The augmentation figure is vertically arranged for a narrow slide column and
+shows nearest-neighbor paired mask rotation. The temporal diagram uses actual
+`t-4,t-2,t` grayscale inputs, automatically selects bounded visible motion, and
+applies one identical square trajectory crop to all frames. Use `--filename`
+to select an eligible frame manually or `--full-frame` to disable the crop.
+
 ## 6. Folder layout (target)
 
 ```
