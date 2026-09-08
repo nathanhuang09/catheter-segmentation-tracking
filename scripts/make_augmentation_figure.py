@@ -32,6 +32,20 @@ def appearance_augmentation(image, seed):
     return cv2.GaussianBlur(augmented.astype(np.float32), (3, 3), 0)
 
 
+def visibility_score(image, mask):
+    """Favor a coherent annotation that contrasts with its immediate surroundings."""
+    area = int(mask.sum())
+    if area < 50: return -np.inf
+    gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(float)
+    dilated = cv2.dilate(mask.astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
+    ring = dilated & ~mask
+    if not ring.any(): return -np.inf
+    count, _, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), 8)
+    largest_ratio = 1.0 if count <= 1 else float(stats[1:, cv2.CC_STAT_AREA].max() / area)
+    local_contrast = abs(float(gray[mask].mean() - gray[ring].mean()))
+    return local_contrast * np.sqrt(min(area, 1500)) * largest_ratio
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifests-from", type=Path, required=True,
@@ -49,33 +63,33 @@ def main():
             raise ValueError(f"{args.filename} is not in the training manifest")
         index = next(i for i, path in enumerate(dataset.images) if path.name == args.filename)
     else:
-        # Choose a clear, nonempty annotation near the upper quartile of mask area.
-        areas = [int(dataset[i][1].sum()) for i in range(len(dataset))]
-        target_area = float(np.quantile([area for area in areas if area > 0], .75))
-        index = min((i for i, area in enumerate(areas) if area > 0),
-                    key=lambda i: abs(areas[i] - target_area))
+        # Choose a coherent annotation with strong local device/background contrast.
+        scores = []
+        for candidate in range(len(dataset)):
+            candidate_image, candidate_mask = dataset[candidate]
+            scores.append(visibility_score(candidate_image.permute(1, 2, 0).numpy(),
+                                           candidate_mask[0].numpy() > .5))
+        index = int(np.argmax(scores))
     image_tensor, mask_tensor = dataset[index]
     image = image_tensor.permute(1, 2, 0).numpy(); mask = mask_tensor[0].numpy() > .5
     appearance = appearance_augmentation(image, args.seed)
     rotated_image, rotated_mask = rotate_pair(image, mask, args.angle)
     output = args.output_dir or args.manifests_from / "slide_figures" / "augmentation"
     output.mkdir(parents=True, exist_ok=True)
-    fig = plt.figure(figsize=(4.5, 9.3), facecolor="white")
-    grid = fig.add_gridspec(3, 2, height_ratios=(1, 1, 1), hspace=.20, wspace=.06)
-    top = fig.add_subplot(grid[0, :]); middle = fig.add_subplot(grid[1, :])
-    bottom_image = fig.add_subplot(grid[2, 0]); bottom_mask = fig.add_subplot(grid[2, 1])
-    panels = ((top, image, "Original training image", None),
-              (middle, appearance, "Intensity, noise, and blur", None),
-              (bottom_image, rotated_image, f"Rotation ({args.angle:g}°)", None),
-              (bottom_mask, rotated_mask, "Transformed mask", "gray"))
+    fig, axes = plt.subplots(2, 2, figsize=(7.0, 7.1), facecolor="white",
+                             gridspec_kw={"hspace": .14, "wspace": .06})
+    panels = ((axes[0, 0], image, "Original training image", None),
+              (axes[0, 1], appearance, "Intensity, noise, and blur", None),
+              (axes[1, 0], rotated_image, f"Rotation ({args.angle:g}°)", None),
+              (axes[1, 1], rotated_mask, "Corresponding rotated mask", "gray"))
     for axis, data, title, cmap in panels:
         axis.imshow(data, cmap=cmap, vmin=0 if cmap else None, vmax=1 if cmap else None,
                     interpolation="nearest" if cmap else "antialiased")
         axis.set_title(title, fontsize=12, pad=7); axis.set_xticks([]); axis.set_yticks([])
         for spine in axis.spines.values(): spine.set_visible(False)
-    fig.subplots_adjust(left=.02, right=.98, top=.97, bottom=.01)
+    fig.subplots_adjust(left=.01, right=.99, top=.95, bottom=.01)
     for suffix in ("png", "pdf"):
-        fig.savefig(output / f"training_augmentation_vertical.{suffix}", dpi=300,
+        fig.savefig(output / f"training_augmentation_2x2.{suffix}", dpi=300,
                     bbox_inches="tight", facecolor="white")
     plt.close(fig)
     metadata = {"filename": dataset.images[index].name, "split": "train",
@@ -84,10 +98,10 @@ def main():
                                        "gaussian_noise_std": .012, "blur_kernel": 3},
                 "seed": args.seed, "mask_interpolation": "nearest",
                 "note": "Deterministic examples within the training augmentation policy; no synthetic anatomy."}
-    with (output / "training_augmentation_vertical.json").open("w", encoding="utf-8") as file:
+    with (output / "training_augmentation_2x2.json").open("w", encoding="utf-8") as file:
         json.dump(metadata, file, indent=2)
     print(f"Confirmed training image: {dataset.images[index].name}")
-    print(f"Saved vertical augmentation figure under {output}")
+    print(f"Saved 2x2 augmentation figure under {output}")
 
 
 if __name__ == "__main__":

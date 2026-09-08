@@ -347,11 +347,13 @@ python scripts/make_temporal_unet_diagram.py \
   --split train
 ```
 
-The augmentation figure is vertically arranged for a narrow slide column and
-shows nearest-neighbor paired mask rotation. The temporal diagram uses actual
-`t-4,t-2,t` grayscale inputs, automatically selects bounded visible motion, and
-applies one identical square trajectory crop to all frames. Use `--filename`
-to select an eligible frame manually or `--full-frame` to disable the crop.
+The augmentation figure is a compact 2x2 grid and shows nearest-neighbor paired
+mask rotation. Its automatic selection favors a coherent annotated device with
+strong local contrast. The temporal visual contains only actual `t-4,t-2,t`
+grayscale inputs with green ground-truth overlays, automatically selects bounded
+visible motion, and applies one identical square trajectory crop to all frames.
+Use `--filename` to select an eligible frame manually or `--full-frame` to
+disable the crop.
 
 ## 6. Folder layout (target)
 
