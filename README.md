@@ -342,6 +342,11 @@ training-manifest frames:
 python scripts/make_augmentation_figure.py \
   --manifests-from "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_noaug_v4"
 
+# Preview one high-visibility candidate from each of several recordings
+python scripts/make_augmentation_figure.py \
+  --manifests-from "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_noaug_v4" \
+  --preview-candidates 12
+
 python scripts/make_temporal_unet_diagram.py \
   --manifests-from "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_noaug_v4" \
   --split train
