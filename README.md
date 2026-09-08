@@ -360,6 +360,11 @@ visible motion, and applies one identical square trajectory crop to all frames.
 Use `--filename` to select an eligible frame manually or `--full-frame` to
 disable the crop.
 
+For a more visible but still faithful augmentation illustration, add
+`--strength strong --angle 10`. This uses the upper bounds of the intensity,
+noise, and rotation ranges used during training rather than exaggerating beyond
+the implemented policy.
+
 ## 6. Folder layout (target)
 
 ```

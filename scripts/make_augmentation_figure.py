@@ -26,11 +26,19 @@ def rotate_pair(image, mask, angle):
     return rotated_image, rotated_mask
 
 
-def appearance_augmentation(image, seed):
+def appearance_parameters(strength):
+    if strength == "strong":
+        return {"contrast": 1.15, "brightness": .08, "noise_std": .025, "blur_kernel": 3}
+    return {"contrast": 1.10, "brightness": .04, "noise_std": .012, "blur_kernel": 3}
+
+
+def appearance_augmentation(image, seed, strength):
     rng = np.random.default_rng(seed)
-    augmented = np.clip(image * 1.10 + .04, 0, 1)
-    augmented = np.clip(augmented + rng.normal(0, .012, augmented.shape), 0, 1)
-    return cv2.GaussianBlur(augmented.astype(np.float32), (3, 3), 0)
+    parameters = appearance_parameters(strength)
+    augmented = np.clip(image * parameters["contrast"] + parameters["brightness"], 0, 1)
+    augmented = np.clip(augmented + rng.normal(0, parameters["noise_std"], augmented.shape), 0, 1)
+    kernel = parameters["blur_kernel"]
+    return cv2.GaussianBlur(augmented.astype(np.float32), (kernel, kernel), 0)
 
 
 def visibility_score(image, mask):
@@ -54,6 +62,8 @@ def main():
     parser.add_argument("--filename", help="Optional filename from the training manifest")
     parser.add_argument("--image-size", type=int, default=256)
     parser.add_argument("--angle", type=float, default=8.0)
+    parser.add_argument("--strength", choices=("moderate", "strong"), default="moderate",
+                        help="Strong uses the upper end of the actual training augmentation ranges")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--preview-candidates", type=int, default=0,
                         help="Create a contact sheet of ranked examples, then choose with --filename")
@@ -85,7 +95,7 @@ def main():
         for row_index, (score, candidate) in enumerate(selected):
             image_tensor, mask_tensor = dataset[candidate]
             image = image_tensor.permute(1, 2, 0).numpy(); mask = mask_tensor[0].numpy() > .5
-            appearance = appearance_augmentation(image, args.seed)
+            appearance = appearance_augmentation(image, args.seed, args.strength)
             rotated_image, rotated_mask = rotate_pair(image, mask, args.angle)
             items = ((image, "Original", None), (appearance, "Appearance", None),
                      (rotated_image, f"Rotation ({args.angle:g} deg)", None),
@@ -117,7 +127,7 @@ def main():
         index = ranked[0][1]
     image_tensor, mask_tensor = dataset[index]
     image = image_tensor.permute(1, 2, 0).numpy(); mask = mask_tensor[0].numpy() > .5
-    appearance = appearance_augmentation(image, args.seed)
+    appearance = appearance_augmentation(image, args.seed, args.strength)
     rotated_image, rotated_mask = rotate_pair(image, mask, args.angle)
     fig, axes = plt.subplots(2, 2, figsize=(7.0, 7.1), facecolor="white",
                              gridspec_kw={"hspace": .14, "wspace": .06})
@@ -137,8 +147,8 @@ def main():
     plt.close(fig)
     metadata = {"filename": dataset.images[index].name, "split": "train",
                 "image_size": args.image_size, "rotation_degrees": args.angle,
-                "appearance_example": {"contrast": 1.10, "brightness": .04,
-                                       "gaussian_noise_std": .012, "blur_kernel": 3},
+                "appearance_strength": args.strength,
+                "appearance_example": appearance_parameters(args.strength),
                 "seed": args.seed, "mask_interpolation": "nearest",
                 "note": "Deterministic examples within the training augmentation policy; no synthetic anatomy."}
     with (output / "training_augmentation_2x2.json").open("w", encoding="utf-8") as file:
