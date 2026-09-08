@@ -18,6 +18,7 @@ CODE_FILES = (
     "scripts/train_human_temporal_unet.py", "scripts/evaluate_human_temporal_unet.py",
     "scripts/evaluate_human_unet_centerline_kalman.py",
     "scripts/audit_human_annotations.py", "scripts/compare_human_experiments.py",
+    "scripts/make_human_qualitative_figure.py",
 )
 
 

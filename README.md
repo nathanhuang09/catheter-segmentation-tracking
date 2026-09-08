@@ -311,6 +311,24 @@ can make the archive unnecessarily large. Select folders with repeated
 `--experiment NAME`, or explicitly opt into large files with
 `--include-probabilities` or `--include-checkpoints`.
 
+Create a publication figure from an actual successful held-out U-Net example in
+two stages. First generate a candidate preview, then rerun with one listed
+filename. The script verifies the exact matched cohort, checkpoint resolution,
+threshold, target non-emptiness, and requested Dice interval.
+
+```bash
+python scripts/make_human_qualitative_figure.py \
+  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_aug_v4/best_model.pt"
+
+python scripts/make_human_qualitative_figure.py \
+  --checkpoint "/content/drive/MyDrive/CathAction/experiments/human_unet_stratified_aug_v4/best_model.pt" \
+  --filename "PASTE_ONE_FILENAME_FROM_candidate_examples.csv"
+```
+
+The default panel order is input image, U-Net prediction, and ground truth
+(evaluation only). It exports a 300-DPI PNG, vector PDF, and JSON provenance
+record without changing the annotation, prediction, or 0.5 threshold.
+
 ## 6. Folder layout (target)
 
 ```
